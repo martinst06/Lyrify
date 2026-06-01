@@ -104,6 +104,12 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .animation(.easeInOut(duration: 0.25), value: vm.activeIndex)
+                                .contentShape(Rectangle())
+                                .onTapGesture { vm.seek(to: line) }
+                                .onHover { inside in
+                                    if inside { NSCursor.pointingHand.push() }
+                                    else { NSCursor.pop() }
+                                }
                                 .id(line.id)
                         }
                     }

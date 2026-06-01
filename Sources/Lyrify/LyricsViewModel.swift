@@ -56,6 +56,15 @@ class LyricsViewModel: ObservableObject {
         main { self.statusMessage = result.plain ?? "No lyrics found." }
     }
 
+    // ── Seek ───────────────────────────────────────────────────────────────
+
+    /// Jump Spotify to a tapped lyric line. Updates the highlight immediately
+    /// for instant feedback; the position loop reconciles once Spotify catches up.
+    func seek(to line: LRCLine) {
+        activeIndex = line.id
+        DispatchQueue.global().async { SpotifyBridge.seek(to: line.time) }
+    }
+
     // ── Position loop ────────────────────────────────────────────────────────
 
     private func positionLoop() {

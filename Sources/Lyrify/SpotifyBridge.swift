@@ -44,6 +44,11 @@ end tell
     static func nextTrack()     { run("tell application \"Spotify\" to next track") }
     static func previousTrack() { run("tell application \"Spotify\" to previous track") }
 
+    /// Jump playback to a position, in seconds. Spotify's `player position` is a real in seconds.
+    static func seek(to seconds: Double) {
+        run("tell application \"Spotify\" to set player position to \(max(0, seconds))")
+    }
+
     @discardableResult
     private static func run(_ source: String) -> String? {
         let p = Process()
