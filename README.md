@@ -9,58 +9,59 @@ Floating synced lyrics window for Spotify on macOS. Built with SwiftUI.
 
 - Synced lyrics that follow playback in real time
 - Frosted glass floating window — always on top, never steals focus
+- Click any lyric line to jump Spotify playback to that point
 - Playback controls (previous, play/pause, next) with spacebar shortcut
-- Fetches lyrics from LRCLIB — works for songs Spotify doesn't have lyrics for
-- Resizable to any size, lives in a corner while you work
+- Resizable, lives in a corner while you work
 
 ## Requirements
 
 - macOS 13+
 - Spotify desktop app
-- [Homebrew](https://brew.sh)
+- Xcode Command Line Tools (`xcode-select --install`)
 
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/Lyrify.git
+git clone git@github.com:martinst06/Lyrify.git
 cd Lyrify
-swift build -c release
-sudo cp .build/release/Lyrify /usr/local/bin/lyrify
-sudo chmod +x /usr/local/bin/lyrify
+./build-app.sh
 ```
 
-## Run
+`build-app.sh` compiles the app and drops `Lyrify.app` on your Desktop. Double-click it — no terminal needed.
 
-```bash
-lyrify
-```
+Grant **Automation** permission when macOS prompts (needed to read track info from Spotify).
 
-Grant **Automation** permission when macOS asks (needed to read track info from Spotify).
-
-### Auto-start on login
+### Optional: auto-start on login
 
 ```bash
 cp LaunchAgent/com.user.lyrify.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.user.lyrify.plist
 ```
 
+> Note: the LaunchAgent runs `/usr/local/bin/lyrify`. Install the binary there if you use this:
+> `sudo cp .build/release/Lyrify /usr/local/bin/lyrify`
+
 ## Usage
 
 | Action | How |
 |--------|-----|
-| Play / Pause | Spacebar (when Lyrify is focused) |
-| Previous track | Click ⏮ |
-| Next track | Click ⏭ |
+| Play / pause | Spacebar (when Lyrify is focused), or the center button |
+| Previous / next track | ⏮ / ⏭ buttons |
+| Jump to a lyric | Click any line — seeks Spotify to that timestamp |
 | Resize | Drag any window edge |
 | Move | Drag anywhere on the window |
 
-## Lyrics source
-
-Lyrics are fetched from [LRCLIB](https://lrclib.net) — a free, community-maintained synced lyrics database. If a song isn't there, the app shows "No lyrics found."
-
 ## Customization
 
-Edit `Sources/Lyrify/ContentView.swift` to change font, colors, and spacing. Rebuild with `swift build -c release` after any changes.
+Edit `Sources/Lyrify/ContentView.swift` for fonts, colors, and spacing. After any change, rebuild with:
+
+```bash
+./build-app.sh
+```
+
+## Lyrics source
+
+Lyrics are fetched from [LRCLIB](https://lrclib.net) — a free, community-maintained synced lyrics database. The app searches for a synced version first; if none exists, it falls back to plain text or "No lyrics found."
 
 ## Privacy
 
