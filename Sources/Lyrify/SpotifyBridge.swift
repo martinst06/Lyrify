@@ -11,23 +11,28 @@ struct SpotifyTrackInfo {
 }
 
 struct SpotifyBridge {
+    // Field delimiter: ASCII Unit Separator (U+001F). A literal "|" breaks parsing for any
+    // track whose name/artist/album contains a pipe (e.g. Denzel Curry's "BLACK BALLOONS |
+    // 13LACK 13ALLOONZ …"). The separator never appears in track metadata.
+    private static let sep = "\u{1F}"
     private static let script = """
 tell application "Spotify"
     if player state is playing or player state is paused then
         set t to current track
+        set d to (character id 31)
         if player state is playing then
             set stStr to "playing"
         else
             set stStr to "paused"
         end if
-        return (name of t) & "|" & (artist of t) & "|" & (album of t) & "|" & ((duration of t) as string) & "|" & ((player position) as string) & "|" & (id of t as string) & "|" & stStr
+        return (name of t) & d & (artist of t) & d & (album of t) & d & ((duration of t) as string) & d & ((player position) as string) & d & (id of t as string) & d & stStr
     end if
 end tell
 """
 
     static func getTrackInfo() -> SpotifyTrackInfo? {
-        guard let out = run(script), out.contains("|") else { return nil }
-        let parts = out.components(separatedBy: "|")
+        guard let out = run(script), out.contains(sep) else { return nil }
+        let parts = out.components(separatedBy: sep)
         guard parts.count >= 6,
               let durationMs = Int(parts[3]),
               let position = Double(parts[4]) else { return nil }
