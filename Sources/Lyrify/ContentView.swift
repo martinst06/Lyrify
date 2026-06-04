@@ -89,15 +89,15 @@ struct ContentView: View {
                         if !line.text.isEmpty {
                             let isActive = line.id == vm.activeIndex
                             Text(line.text)
-                                .font(.system(size: 15, weight: isActive ? .bold : .medium))
-                                .foregroundStyle(
-                                    isActive
-                                        ? AnyShapeStyle(Color.white)
-                                        : AnyShapeStyle(Color.white.opacity(0.3))
-                                )
+                                // Constant weight: animating bold↔medium crossfades two
+                                // text bitmaps and flickers on fast lines. Emphasis comes
+                                // from brightness + a subtle scale, which interpolate cleanly.
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white.opacity(isActive ? 1 : 0.3))
+                                .scaleEffect(isActive ? 1 : 0.96, anchor: .leading)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
-                                .animation(.easeInOut(duration: 0.25), value: vm.activeIndex)
+                                .animation(.easeOut(duration: 0.2), value: isActive)
                                 .contentShape(Rectangle())
                                 .onTapGesture { vm.seek(to: line) }
                                 .onHover { inside in
