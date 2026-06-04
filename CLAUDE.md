@@ -30,6 +30,10 @@ swift build -c release                    # compile only
 
 After any source change, re-run `./build-app.sh` to refresh the desktop app.
 
+> **Important — new machine setup:** Always run `./build-app.sh` after cloning. Never copy
+> `Lyrify.app` from another machine — the app must be compiled natively or lyrics will hang
+> on "Loading…" due to URLSession not working correctly in a copied binary.
+
 To regenerate the icon after editing `app/make-icon.py`:
 ```bash
 python3 app/make-icon.py   # overwrites app/AppIcon.icns + app/icon-1024.png
