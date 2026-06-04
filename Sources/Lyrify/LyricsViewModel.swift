@@ -49,6 +49,13 @@ class LyricsViewModel: ObservableObject {
             album: info.album, durationMs: info.durationMs
         )
 
+        // fetchSync blocks for up to a few seconds. If the user skipped tracks while
+        // it was in flight, the live track no longer matches what we fetched — drop the
+        // stale result so we don't paint one song's lyrics over another. The next tick
+        // re-detects the current track and fetches it fresh.
+        if let live = SpotifyBridge.getTrackInfo(),
+           "\(live.title)|\(live.artist)" != key { return }
+
         if let synced = result.synced {
             let parsed = LRCParser.parse(synced)
             if !parsed.isEmpty { main { self.lines = parsed }; return }

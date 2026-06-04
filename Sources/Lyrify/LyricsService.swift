@@ -79,7 +79,9 @@ struct LyricsService {
     }
 
     private static func syncFetch(url: URL) -> Data? {
-        var req = URLRequest(url: url, timeoutInterval: 6)
+        // LRCLIB can take 7-8s to respond when under load; a tight timeout makes the
+        // app drop the connection early and falsely report "No lyrics found."
+        var req = URLRequest(url: url, timeoutInterval: 15)
         req.setValue("Lyrify/1.0", forHTTPHeaderField: "User-Agent")
         var result: Data?
         let sem = DispatchSemaphore(value: 0)
