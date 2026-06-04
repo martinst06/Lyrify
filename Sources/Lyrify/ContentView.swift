@@ -57,31 +57,25 @@ struct ContentView: View {
 
                 // Playback controls
                 Divider().background(Color.white.opacity(0.1))
-                HStack(spacing: 28) {
+                HStack(spacing: 14) {
                     Spacer()
                     Button { DispatchQueue.global().async { SpotifyBridge.previousTrack() } } label: {
                         Image(systemName: "backward.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.6))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
 
                     Button { DispatchQueue.global().async { SpotifyBridge.playPause() } } label: {
                         Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 17))
-                            .foregroundStyle(.white)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlButtonStyle(size: 17, idleOpacity: 0.95))
 
                     Button { DispatchQueue.global().async { SpotifyBridge.nextTrack() } } label: {
                         Image(systemName: "forward.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.white.opacity(0.6))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
                     Spacer()
                 }
-                .padding(.vertical, 10)
+                .padding(.vertical, 8)
             }
         }
         .preferredColorScheme(.dark)
@@ -124,6 +118,43 @@ struct ContentView: View {
                     proxy.scrollTo(newIdx - 2, anchor: .top)
                 }
             }
+        }
+    }
+}
+
+/// Playback-control button: brightens, grows, and shows a circular highlight on
+/// hover, presses inward on click, and swaps to a pointing-hand cursor.
+private struct ControlButtonStyle: ButtonStyle {
+    let size: CGFloat
+    let idleOpacity: Double
+
+    func makeBody(configuration: Configuration) -> some View {
+        ControlButton(configuration: configuration, size: size, idleOpacity: idleOpacity)
+    }
+
+    private struct ControlButton: View {
+        let configuration: ButtonStyleConfiguration
+        let size: CGFloat
+        let idleOpacity: Double
+        @State private var hovering = false
+
+        var body: some View {
+            let pressed = configuration.isPressed
+            configuration.label
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.white.opacity(hovering ? 1 : idleOpacity))
+                .frame(width: size * 2.1, height: size * 2.1)
+                .background(
+                    Circle().fill(.white.opacity(pressed ? 0.22 : (hovering ? 0.1 : 0)))
+                )
+                .scaleEffect(pressed ? 0.85 : (hovering ? 1.13 : 1))
+                .animation(.spring(response: 0.25, dampingFraction: 0.65), value: hovering)
+                .animation(.spring(response: 0.18, dampingFraction: 0.55), value: pressed)
+                .contentShape(Circle())
+                .onHover { inside in
+                    hovering = inside
+                    if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+                }
         }
     }
 }
