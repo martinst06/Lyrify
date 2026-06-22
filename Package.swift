@@ -8,6 +8,11 @@ let package = Package(
         .executableTarget(
             name: "Lyrify",
             path: "Sources/Lyrify"
+        ),
+        .testTarget(
+            name: "LyrifyTests",
+            dependencies: ["Lyrify"],
+            path: "Tests/LyrifyTests"
         )
     ]
 )

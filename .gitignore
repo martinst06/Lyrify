@@ -4,3 +4,7 @@
 *.d
 *.swp
 .DS_Store
+
+# Local Spotify Web API credentials — live in ~/Library/Application Support/Lyrify/, never the repo
+config.json
+tokens.json

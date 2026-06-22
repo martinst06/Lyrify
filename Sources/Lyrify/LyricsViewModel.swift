@@ -17,6 +17,7 @@ class LyricsViewModel: ObservableObject {
     private var linesSnapshot: [LRCLine] = []
     private var activeIndexSnapshot = -1
     private var isPlayingSnapshot = false
+    private var lastPreloadedKey = ""
 
     // Lyrics fetching blocks (up to the LRCLIB timeout). It runs on its own serial queue so
     // a slow or lyric-less song can never stall track-change detection or the position loop —
@@ -61,6 +62,28 @@ class LyricsViewModel: ObservableObject {
 
         // Hand the blocking fetch to the worker; detection keeps polling at 0.8s.
         fetchQueue.async { [weak self] in self?.fetchLyrics(for: info, key: key) }
+
+        // Learn the next song from the Spotify Web API and warm its lyrics into the cache, so
+        // the upcoming track change is an instant cache hit instead of a "Loading…" gap. Fully
+        // optional: no client ID / auth / active device just means this is a no-op.
+        preloadNextLyrics()
+    }
+
+    private func preloadNextLyrics() {
+        SpotifyWebAPI.nextTrack { [weak self] next in
+            guard let self = self, let next = next else { return }
+            let key = "\(next.title)|\(next.artist)"
+            self.stateLock.lock()
+            let alreadyPreloaded = key == self.lastPreloadedKey
+            if !alreadyPreloaded { self.lastPreloadedKey = key }
+            self.stateLock.unlock()
+            guard !alreadyPreloaded else { return }
+
+            // Warm the cache; the result is discarded. Runs on the Web API queue, never the
+            // detection loop, the position loop, or main.
+            _ = LyricsService.fetchSync(title: next.title, artist: next.artist,
+                                        album: next.album, durationMs: next.durationMs)
+        }
     }
 
     private func fetchLyrics(for info: SpotifyTrackInfo, key: String) {
