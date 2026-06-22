@@ -6,24 +6,63 @@ struct LyricsResult {
 }
 
 struct LyricsService {
-    static func fetchSync(title: String, artist: String, album: String, durationMs: Int) -> LyricsResult {
-        var fallbackPlain: String?
+    // Per-track result cache so skipping back to a song is instant and we don't re-hit
+    // LRCLIB. Bounded only by the number of distinct tracks played in a session.
+    private static var cache: [String: LyricsResult] = [:]
+    private static let cacheLock = NSLock()
+    private final class Holder { var value: LyricsResult? }
 
-        // 1. Exact match (/api/get). Use it only if it actually carries synced lyrics;
-        //    otherwise hold onto its plain text and keep looking for a synced version.
-        if let r = exactMatch(title: title, artist: artist, album: album, durationMs: durationMs) {
-            if r.synced != nil { return r }
-            fallbackPlain = r.plain
+    // The concurrent search runs here, not on the shared GCD global pool. fetchSync is
+    // already serialized by its single caller, so this blocks at most one extra thread at
+    // a time — and never one the rest of the app needs.
+    private static let searchQueue = DispatchQueue(label: "lyrify.lyrics.search")
+
+    /// `onEarlyPlain` fires as soon as the exact-match lookup returns plain-only lyrics,
+    /// before the (slower) synced search finishes — so the UI can show something instead
+    /// of "Loading…". The final return value is still the best available result.
+    static func fetchSync(title: String, artist: String, album: String, durationMs: Int,
+                          onEarlyPlain: ((String) -> Void)? = nil) -> LyricsResult {
+        let key = [title, artist, album, String(durationMs)].joined(separator: "\u{1F}")
+        cacheLock.lock(); let cached = cache[key]; cacheLock.unlock()
+        if let cached = cached { return cached }
+
+        // Start the search concurrently with the exact-match lookup, so a slow LRCLIB
+        // costs one round-trip instead of two back-to-back.
+        let holder = Holder()
+        let group = DispatchGroup()
+        group.enter()
+        searchQueue.async {
+            holder.value = searchMatch(title: title, artist: artist, durationMs: durationMs)
+            group.leave()
         }
 
-        // 2. Search (/api/search). Prefer a synced result; if several exist, the closest
-        //    duration wins — multiple cuts of a song often coexist under variant titles.
-        if let r = searchMatch(title: title, artist: artist, durationMs: durationMs) {
-            if r.synced != nil { return r }
+        var fallbackPlain: String?
+
+        // 1. Exact match (/api/get): the canonical hit. If it carries synced lyrics we
+        //    return right away — the in-flight search is harmless and just gets discarded.
+        if let r = exactMatch(title: title, artist: artist, album: album, durationMs: durationMs) {
+            if r.synced != nil { return store(key, r) }
+            if let p = r.plain { fallbackPlain = p; onEarlyPlain?(p) }
+        }
+
+        // 2. No exact synced version — fold in the search result (already in flight).
+        //    Prefer a synced result; if several exist, the closest duration won.
+        group.wait()
+        if let r = holder.value {
+            if r.synced != nil { return store(key, r) }
             fallbackPlain = fallbackPlain ?? r.plain
         }
 
-        return LyricsResult(synced: nil, plain: fallbackPlain)
+        // Cache only positive results; a nil/nil outcome may be a transient network
+        // failure we don't want to remember as a permanent miss.
+        let result = LyricsResult(synced: nil, plain: fallbackPlain)
+        return fallbackPlain != nil ? store(key, result) : result
+    }
+
+    @discardableResult
+    private static func store(_ key: String, _ result: LyricsResult) -> LyricsResult {
+        cacheLock.lock(); cache[key] = result; cacheLock.unlock()
+        return result
     }
 
     private static func exactMatch(title: String, artist: String, album: String, durationMs: Int) -> LyricsResult? {

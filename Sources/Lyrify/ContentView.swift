@@ -44,13 +44,18 @@ struct ContentView: View {
                 }
 
                 if vm.lines.isEmpty {
-                    Spacer()
-                    Text(vm.statusMessage)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(24)
-                    Spacer()
+                    // Scrollable: when there's no synced LRC we show the full plain lyrics
+                    // here, which overflow a short window. Without the ScrollView the
+                    // overflow was simply unreachable on the minimised window.
+                    ScrollView(.vertical, showsIndicators: false) {
+                        Text(vm.statusMessage)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(24)
+                    }
+                    .frame(maxHeight: .infinity)
                 } else {
                     lyricsView
                 }
@@ -59,17 +64,17 @@ struct ContentView: View {
                 Divider().background(Color.white.opacity(0.1))
                 HStack(spacing: 14) {
                     Spacer()
-                    Button { DispatchQueue.global().async { SpotifyBridge.previousTrack() } } label: {
+                    Button { SpotifyBridge.previousTrack() } label: {
                         Image(systemName: "backward.fill")
                     }
                     .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
 
-                    Button { DispatchQueue.global().async { SpotifyBridge.playPause() } } label: {
+                    Button { SpotifyBridge.playPause() } label: {
                         Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
                     }
                     .buttonStyle(ControlButtonStyle(size: 17, idleOpacity: 0.95))
 
-                    Button { DispatchQueue.global().async { SpotifyBridge.nextTrack() } } label: {
+                    Button { SpotifyBridge.nextTrack() } label: {
                         Image(systemName: "forward.fill")
                     }
                     .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))

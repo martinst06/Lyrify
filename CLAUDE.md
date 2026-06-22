@@ -42,10 +42,12 @@ python3 app/make-icon.py   # overwrites app/AppIcon.icns + app/icon-1024.png
 
 ## Architecture notes
 
-- **No Combine, no async/await** — two background threads with `Thread.sleep` + `DispatchQueue.main.async`. Simple and stable.
-- **LyricsService.fetchSync is blocking** — called from the background track-change thread intentionally. Don't move it to the main thread.
+- **No Combine, no async/await** — two background poll loops with `Thread.sleep` + `DispatchQueue.main.async`. Simple and stable.
+- **Never block a shared GCD pool thread.** All blocking work runs on dedicated serial queues, never `DispatchQueue.global().async`: lyric fetches on `LyricsViewModel.fetchQueue`, the concurrent search inside `fetchSync` on `LyricsService.searchQueue`, AppleScript commands on `SpotifyBridge.commandQueue`. Blocking the shared pool (a `sem.wait`/`waitUntilExit` per no-lyrics song, plus button taps) used to exhaust it and freeze the whole app.
+- **LyricsService.fetchSync is blocking** — run it on `LyricsViewModel.fetchQueue`, decoupled from the track-change loop so a slow/lyric-less song can't stall detection. Don't call it from the detection loop or the main thread.
+- **Background loops don't touch the main thread synchronously.** The position loop reads `lines`/`activeIndex`/`isPlaying` from `stateLock`-guarded snapshots (kept in sync by `setLines`/`setActiveIndex`), never `DispatchQueue.main.sync`. Reconcile `isPlaying` every tick, before any empty-lyrics early return.
 - **Lyrics matching strategy** in `LyricsService`: `/api/get` exact match first; if it returns plain-only, don't stop — keep searching. `/api/search` scans all results, picks the synced candidate closest to the track's duration. Only falls back to plain text if no synced version exists anywhere.
-- **Click-to-seek**: `vm.seek(to:)` sets `activeIndex` optimistically on the main thread for instant visual feedback, then calls `SpotifyBridge.seek(to:)` on a background thread. The position loop reconciles within ~0.4s.
+- **Click-to-seek**: `vm.seek(to:)` sets `activeIndex` optimistically for instant visual feedback, then calls `SpotifyBridge.seek(to:)` (which dispatches to `commandQueue`). The position loop reconciles within ~0.4s.
 - **`nonEmpty(_:)`** in LyricsService collapses both `null` and `""` from LRCLIB to nil — LRCLIB returns both forms for absent lyrics.
 
 ## Key design decisions

@@ -8,59 +8,92 @@ class LyricsViewModel: ObservableObject {
     @Published var trackArtist: String = ""
     @Published var isPlaying: Bool = false
 
+    // The background loops read these snapshots under `stateLock` instead of hopping onto
+    // the main thread. `DispatchQueue.main.sync` on a 0.4s loop is a deadlock waiting to
+    // happen; the snapshots stay in lock-step with the @Published values (see `setLines`/
+    // `setActiveIndex`) so the loops always see the freshest state.
+    private let stateLock = NSLock()
     private var currentKey = ""
+    private var linesSnapshot: [LRCLine] = []
+    private var activeIndexSnapshot = -1
+    private var isPlayingSnapshot = false
+
+    // Lyrics fetching blocks (up to the LRCLIB timeout). It runs on its own serial queue so
+    // a slow or lyric-less song can never stall track-change detection or the position loop —
+    // detection used to share this thread, so one slow fetch froze the whole app.
+    private let fetchQueue = DispatchQueue(label: "lyrify.fetch")
+
     init() {
         DispatchQueue.global(qos: .background).async { [weak self] in self?.trackLoop() }
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in self?.positionLoop() }
     }
 
-    // ── Track change loop ────────────────────────────────────────────────────
+    // ── Track change loop (detection only — never blocks on the network) ──────
 
     private func trackLoop() {
         while true {
             checkTrack()
-            Thread.sleep(forTimeInterval: 1.5)
+            Thread.sleep(forTimeInterval: 0.8)
         }
     }
 
     private func checkTrack() {
         guard let info = SpotifyBridge.getTrackInfo() else {
-            if !currentKey.isEmpty {
-                currentKey = ""
-                main { self.lines = []; self.statusMessage = "Waiting for Spotify…" }
+            stateLock.lock(); let had = !currentKey.isEmpty; if had { currentKey = "" }; stateLock.unlock()
+            if had {
+                setLines([])
+                main { self.statusMessage = "Waiting for Spotify…" }
             }
             return
         }
 
         let key = "\(info.title)|\(info.artist)"
-        guard key != currentKey else { return }
-        currentKey = key
+        stateLock.lock(); let changed = key != currentKey; if changed { currentKey = key }; stateLock.unlock()
+        guard changed else { return }
 
+        setLines([])
+        setActiveIndex(-1)
         main {
-            self.lines = []
-            self.activeIndex = -1
             self.trackTitle = info.title
             self.trackArtist = info.artist
             self.statusMessage = "Loading…"
         }
 
+        // Hand the blocking fetch to the worker; detection keeps polling at 0.8s.
+        fetchQueue.async { [weak self] in self?.fetchLyrics(for: info, key: key) }
+    }
+
+    private func fetchLyrics(for info: SpotifyTrackInfo, key: String) {
+        // The track may have changed again before this fetch got its turn on the queue.
+        guard isCurrent(key) else { return }
+
         let result = LyricsService.fetchSync(
             title: info.title, artist: info.artist,
-            album: info.album, durationMs: info.durationMs
+            album: info.album, durationMs: info.durationMs,
+            onEarlyPlain: { [weak self] plain in
+                // Progressive display: show plain text the moment it's available, while the
+                // synced version is still loading, instead of sitting on "Loading…".
+                guard let self = self, self.isCurrent(key) else { return }
+                self.main { if self.lines.isEmpty { self.statusMessage = plain } }
+            }
         )
 
-        // fetchSync blocks for up to a few seconds. If the user skipped tracks while
-        // it was in flight, the live track no longer matches what we fetched — drop the
-        // stale result so we don't paint one song's lyrics over another. The next tick
-        // re-detects the current track and fetches it fresh.
-        if let live = SpotifyBridge.getTrackInfo(),
-           "\(live.title)|\(live.artist)" != key { return }
+        // fetchSync blocked for up to a few seconds. If the user skipped tracks while it was
+        // in flight, the live track no longer matches what we fetched — drop the stale result
+        // so we don't paint one song's lyrics over another.
+        guard isCurrent(key) else { return }
 
         if let synced = result.synced {
             let parsed = LRCParser.parse(synced)
-            if !parsed.isEmpty { main { self.lines = parsed }; return }
+            if !parsed.isEmpty { setLines(parsed); return }
         }
+        setLines([])
         main { self.statusMessage = result.plain ?? "No lyrics found." }
+    }
+
+    private func isCurrent(_ key: String) -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return key == currentKey
     }
 
     // ── Seek ───────────────────────────────────────────────────────────────
@@ -68,8 +101,8 @@ class LyricsViewModel: ObservableObject {
     /// Jump Spotify to a tapped lyric line. Updates the highlight immediately
     /// for instant feedback; the position loop reconciles once Spotify catches up.
     func seek(to line: LRCLine) {
-        activeIndex = line.id
-        DispatchQueue.global().async { SpotifyBridge.seek(to: line.time) }
+        setActiveIndex(line.id)
+        SpotifyBridge.seek(to: line.time)
     }
 
     // ── Position loop ────────────────────────────────────────────────────────
@@ -82,15 +115,40 @@ class LyricsViewModel: ObservableObject {
     }
 
     private func updatePosition() {
-        let (lines, current) = DispatchQueue.main.sync { (self.lines, self.activeIndex) }
-        guard !lines.isEmpty, let info = SpotifyBridge.getTrackInfo() else { return }
+        guard let info = SpotifyBridge.getTrackInfo() else { return }
+
+        stateLock.lock()
+        let lines = linesSnapshot
+        let current = activeIndexSnapshot
+        let wasPlaying = isPlayingSnapshot
+        stateLock.unlock()
+
+        // Reconcile play/pause every tick, even with no lyrics. This used to sit *after* the
+        // empty-lines guard, so the button stuck on the wrong icon for lyric-less songs.
+        if info.isPlaying != wasPlaying {
+            stateLock.lock(); isPlayingSnapshot = info.isPlaying; stateLock.unlock()
+            main { self.isPlaying = info.isPlaying }
+        }
+
+        guard !lines.isEmpty else { return }
 
         var idx = -1
         for line in lines {
             if line.time <= info.position { idx = line.id } else { break }
         }
-        if idx != current { main { self.activeIndex = idx } }
-        if info.isPlaying != self.isPlaying { main { self.isPlaying = info.isPlaying } }
+        if idx != current { setActiveIndex(idx) }
+    }
+
+    // ── State setters: keep the @Published value (UI) and the snapshot (loops) in sync ──
+
+    private func setLines(_ value: [LRCLine]) {
+        stateLock.lock(); linesSnapshot = value; stateLock.unlock()
+        main { self.lines = value }
+    }
+
+    private func setActiveIndex(_ value: Int) {
+        stateLock.lock(); activeIndexSnapshot = value; stateLock.unlock()
+        main { self.activeIndex = value }
     }
 
     private func main(_ block: @escaping () -> Void) {

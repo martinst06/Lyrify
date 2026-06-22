@@ -30,7 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 49 { // spacebar
-                DispatchQueue.global().async { SpotifyBridge.playPause() }
+                SpotifyBridge.playPause()
                 return nil
             }
             return event

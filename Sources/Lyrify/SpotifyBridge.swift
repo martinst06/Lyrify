@@ -45,13 +45,23 @@ end tell
         )
     }
 
-    static func playPause()     { run("tell application \"Spotify\" to playpause") }
-    static func nextTrack()     { run("tell application \"Spotify\" to next track") }
-    static func previousTrack() { run("tell application \"Spotify\" to previous track") }
+    // Fire-and-forget commands run on one dedicated serial queue, never on the shared GCD
+    // pool. Each osascript call blocks until Spotify answers (and can stall if Spotify is
+    // busy); funnelling them here means a slow command can't pile up worker threads and
+    // starve the pool — which used to wedge the track loop and make the buttons go dead.
+    private static let commandQueue = DispatchQueue(label: "lyrify.spotify.command")
+
+    static func playPause()     { command("tell application \"Spotify\" to playpause") }
+    static func nextTrack()     { command("tell application \"Spotify\" to next track") }
+    static func previousTrack() { command("tell application \"Spotify\" to previous track") }
 
     /// Jump playback to a position, in seconds. Spotify's `player position` is a real in seconds.
     static func seek(to seconds: Double) {
-        run("tell application \"Spotify\" to set player position to \(max(0, seconds))")
+        command("tell application \"Spotify\" to set player position to \(max(0, seconds))")
+    }
+
+    private static func command(_ source: String) {
+        commandQueue.async { run(source) }
     }
 
     @discardableResult
@@ -61,10 +71,15 @@ end tell
         p.arguments = ["-e", source]
         let pipe = Pipe()
         p.standardOutput = pipe
-        p.standardError = Pipe()
+        // Discard stderr rather than wiring an unread Pipe: a stderr pipe whose buffer fills
+        // and that nobody drains blocks osascript on write, hanging waitUntilExit forever.
+        p.standardError = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return nil }
+        // Drain stdout to EOF *before* waiting on exit. Reading after waitUntilExit can
+        // deadlock if osascript ever fills the pipe buffer (it blocks writing and never exits).
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+        return String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
