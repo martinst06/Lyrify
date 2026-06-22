@@ -15,6 +15,9 @@ struct VisualEffectView: NSViewRepresentable {
 struct ContentView: View {
     @ObservedObject var vm: LyricsViewModel
 
+    /// Identity of the currently displayed song. When it changes, the content crossfades.
+    private var songKey: String { "\(vm.trackTitle)\u{1F}\(vm.trackArtist)" }
+
     var body: some View {
         ZStack {
             VisualEffectView().ignoresSafeArea()
@@ -23,42 +26,50 @@ struct ContentView: View {
                 // Clear zone for the traffic light buttons
                 Color.clear.frame(height: 14)
 
-                // Track info header
-                if !vm.trackTitle.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(vm.trackTitle)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .lineLimit(1)
-                        Text(vm.trackArtist)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.4))
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                // Per-song content — crossfades on each song change instead of snapping.
+                ZStack(alignment: .top) {
+                    VStack(spacing: 0) {
+                        // Track info header
+                        if !vm.trackTitle.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(vm.trackTitle)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.85))
+                                    .lineLimit(1)
+                                Text(vm.trackArtist)
+                                    .font(.system(size: 11, weight: .regular))
+                                    .foregroundStyle(.white.opacity(0.4))
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
 
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                }
+                            Divider()
+                                .background(Color.white.opacity(0.1))
+                        }
 
-                if vm.lines.isEmpty {
-                    // Scrollable: when there's no synced LRC we show the full plain lyrics
-                    // here, which overflow a short window. Without the ScrollView the
-                    // overflow was simply unreachable on the minimised window.
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Text(vm.statusMessage)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .padding(24)
+                        if vm.lines.isEmpty {
+                            // Scrollable: when there's no synced LRC we show the full plain
+                            // lyrics here, which overflow a short window.
+                            ScrollView(.vertical, showsIndicators: false) {
+                                Text(vm.statusMessage)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(24)
+                            }
+                            .frame(maxHeight: .infinity)
+                        } else {
+                            lyricsView
+                        }
                     }
-                    .frame(maxHeight: .infinity)
-                } else {
-                    lyricsView
+                    .id(songKey)
+                    .transition(.opacity)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(.easeInOut(duration: 0.3), value: songKey)
 
                 // Playback controls
                 Divider().background(Color.white.opacity(0.1))
