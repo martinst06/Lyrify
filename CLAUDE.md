@@ -10,11 +10,12 @@ A macOS floating lyrics window for Spotify. SwiftUI, Swift package, no external 
 |------|---------|
 | `Sources/Lyrify/main.swift` | Entry point — creates the NSWindow + AppDelegate, registers spacebar shortcut |
 | `Sources/Lyrify/SpotifyBridge.swift` | All AppleScript calls: track info, play/pause, next/prev, seek |
-| `Sources/Lyrify/LyricsService.swift` | LRCLIB fetch — exact match (`/api/get`), then search (`/api/search`) with synced-first, closest-duration tiebreak |
+| `Sources/Lyrify/LyricsService.swift` | LRCLIB fetch — exact match (`/api/get`), then search (`/api/search`) with synced-first, closest-duration tiebreak; falls through to `GeniusService` when LRCLIB has nothing |
+| `Sources/Lyrify/GeniusService.swift` | Last-resort **plain-text** fallback — finds the song via Genius search (official API if `geniusToken` set, else public web search) and scrapes lyrics from the page HTML |
 | `Sources/Lyrify/LRCParser.swift` | Parses `[mm:ss.xx]` LRC timestamps into `[LRCLine]` |
 | `Sources/Lyrify/LyricsViewModel.swift` | Poll loops (track change 0.8s, position sync 0.4s), `seek(to:)`, next-track lyric preload |
 | `Sources/Lyrify/ContentView.swift` | SwiftUI view — lyrics scroll, playback controls, hover cursor, click-to-seek |
-| `Sources/Lyrify/SpotifyConfig.swift` | Reads optional `~/Library/Application Support/Lyrify/config.json` (`clientId`); absent ⇒ Web API off |
+| `Sources/Lyrify/SpotifyConfig.swift` | Reads optional `~/Library/Application Support/Lyrify/config.json` (`clientId`, `geniusToken`); absent ⇒ Web API off / Genius uses public search |
 | `Sources/Lyrify/SpotifyAuth.swift` | Spotify Web API OAuth (PKCE), loopback callback, token store/refresh (`tokens.json`, 0600) |
 | `Sources/Lyrify/SpotifyWebAPI.swift` | `GET /me/player/queue` → next track, used only to preload lyrics |
 | `Tests/LyrifyTests/LyrifyTests.swift` | Unit tests for the pure logic (PKCE, token/queue/HTTP parsing) — `swift test` |
@@ -66,7 +67,8 @@ python3 app/make-icon.py   # overwrites app/AppIcon.icns + app/icon-1024.png
 
 ## Key design decisions
 
-- **LRCLIB only** (no Musixmatch, no Spotify internal endpoint). Free, legit, no API key. Coverage is patchier for non-English/folk tracks but the matching logic is tuned to find synced versions LRCLIB does have.
+- **LRCLIB is the primary source** (no Musixmatch, no Spotify internal endpoint). Free, legit, no API key, and the only source of *synced* lyrics. Coverage is patchier for non-English/folk tracks but the matching logic is tuned to find synced versions LRCLIB does have.
+- **Genius is a last-resort, plain-text-only fallback** (`GeniusService`), tried only when LRCLIB returns nothing. Genius has no lyrics-in-API, so the words are scraped from the song page HTML — hence unsynced (no auto-scroll / click-to-seek), rendered through the same plain-text path as an LRCLIB plain result. Fragile by nature (breaks if Genius changes its markup) and ToS-gray; kept for personal-use coverage of tracks LRCLIB misses. Optional `geniusToken` only improves the song-matching step, never returns lyrics itself. Scrape targets `<div data-lyrics-container>` and drops `data-exclude-from-selection` chrome subtrees.
 - **Ad-hoc codesigned bundle**. Locally built so no quarantine. No Apple Developer account needed.
 - **`build-app.sh` is the canonical way to install**, not `sudo cp`. It handles the full bundle assembly including icon.
 

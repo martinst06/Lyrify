@@ -53,6 +53,12 @@ struct LyricsService {
             fallbackPlain = fallbackPlain ?? r.plain
         }
 
+        // 3. LRCLIB had nothing at all — last resort: scrape Genius (plain text only).
+        //    Runs here on fetchSync's own serial queue, never the shared GCD pool.
+        if fallbackPlain == nil {
+            fallbackPlain = GeniusService.fetchPlain(title: title, artist: artist)
+        }
+
         // Cache only positive results; a nil/nil outcome may be a transient network
         // failure we don't want to remember as a permanent miss.
         let result = LyricsResult(synced: nil, plain: fallbackPlain)

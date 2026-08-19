@@ -12,6 +12,7 @@ Floating synced lyrics window for Spotify on macOS. Built with SwiftUI.
 - Click any lyric line to jump Spotify playback to that point
 - Playback controls (previous, play/pause, next) with spacebar shortcut
 - Resizable, lives in a corner while you work
+- Falls back to plain-text lyrics from Genius for songs LRCLIB doesn't have
 - Optional: preloads the next song's lyrics so track changes are instant (see setup below)
 
 ## Requirements
@@ -76,11 +77,26 @@ Edit `Sources/Lyrify/ContentView.swift` for fonts, colors, and spacing. After an
 
 ## Lyrics source
 
-Lyrics are fetched from [LRCLIB](https://lrclib.net) — a free, community-maintained synced lyrics database. The app searches for a synced version first; if none exists, it falls back to plain text or "No lyrics found."
+Lyrics are fetched from [LRCLIB](https://lrclib.net) — a free, community-maintained synced lyrics database. The app searches for a synced version first; if none exists it uses LRCLIB's plain text.
+
+If LRCLIB has nothing at all, Lyrify falls back to [Genius](https://genius.com). Genius has no lyrics API, so the words are read from the song page — that means **plain text only**: it displays as a scrollable block that doesn't auto-scroll or click-to-seek (Genius has no timestamps). Only songs LRCLIB completely misses ever hit Genius; everything else is unchanged. If Genius has nothing either, you get "No lyrics found."
+
+### Optional: sharper Genius matching (Genius API token)
+
+The Genius fallback works out of the box with no setup. Adding a Genius API token only improves *which* song it picks for tricky queries (multiple/featured artists, non-Latin titles) — it does **not** change how lyrics are fetched (still scraped from the page).
+
+1. Create a client in the [Genius API dashboard](https://genius.com/api-clients) and generate a **Client Access Token**.
+2. Add it to `~/Library/Application Support/Lyrify/config.json` (same file as the Spotify `clientId`, if you use that):
+   ```json
+   { "geniusToken": "YOUR_GENIUS_TOKEN" }
+   ```
+
+Leave `geniusToken` out and Genius simply uses its public web search instead.
 
 ## Privacy
 
 No data is collected. The app only communicates with:
 - Spotify (via AppleScript, local only)
 - lrclib.net (to fetch lyrics)
+- genius.com / api.genius.com — *(only for songs LRCLIB has no lyrics for)* to search for and read the song's lyrics page. No account needed; a `geniusToken`, if you add one, is stored locally and only sent to Genius.
 - *(only if you enable preload)* accounts.spotify.com / api.spotify.com — to read your playback queue. Read-only access (`user-read-playback-state`); tokens are stored locally on your machine and never sent anywhere else.
