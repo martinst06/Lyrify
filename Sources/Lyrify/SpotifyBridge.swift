@@ -15,9 +15,14 @@ struct SpotifyBridge {
     // track whose name/artist/album contains a pipe (e.g. Denzel Curry's "BLACK BALLOONS |
     // 13LACK 13ALLOONZ …"). The separator never appears in track metadata.
     private static let sep = "\u{1F}"
+    // Return the current track whenever it's accessible — including when Spotify drops to
+    // `stopped` after a long pause (reported as paused). The old guard required `playing` or
+    // `paused`, so a long pause wiped the lyrics to "Waiting for Spotify…" and recovery was
+    // fragile. `current track` throwing (no track loaded / Spotify closed) is caught and
+    // yields empty output ⇒ getTrackInfo returns nil ⇒ genuine "Waiting for Spotify…".
     private static let script = """
 tell application "Spotify"
-    if player state is playing or player state is paused then
+    try
         set t to current track
         set d to (character id 31)
         if player state is playing then
@@ -26,7 +31,7 @@ tell application "Spotify"
             set stStr to "paused"
         end if
         return (name of t) & d & (artist of t) & d & (album of t) & d & ((duration of t) as string) & d & ((player position) as string) & d & (id of t as string) & d & stStr
-    end if
+    end try
 end tell
 """
 
@@ -52,6 +57,9 @@ end tell
     private static let commandQueue = DispatchQueue(label: "lyrify.spotify.command")
 
     static func playPause()     { command("tell application \"Spotify\" to playpause") }
+    // Explicit play/pause — `play` resumes from a `stopped` state where `playpause` can no-op.
+    static func play()          { command("tell application \"Spotify\" to play") }
+    static func pause()         { command("tell application \"Spotify\" to pause") }
     static func nextTrack()     { command("tell application \"Spotify\" to next track") }
     static func previousTrack() { command("tell application \"Spotify\" to previous track") }
 
@@ -77,8 +85,15 @@ end tell
         guard (try? p.run()) != nil else { return nil }
         // Drain stdout to EOF *before* waiting on exit. Reading after waitUntilExit can
         // deadlock if osascript ever fills the pipe buffer (it blocks writing and never exits).
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let readHandle = pipe.fileHandleForReading
+        let data = readHandle.readDataToEndOfFile()
         p.waitUntilExit()
+        // Close the read end explicitly. Pipe/FileHandle only close their fd on dealloc, and
+        // these run inside the never-returning background poll loops whose autorelease pool
+        // never drains — so relying on dealloc leaked one pipe fd per call (~2–4/sec) until the
+        // process hit its fd ceiling and every osascript spawn/read silently returned empty,
+        // freezing the app on "Waiting for Spotify…". Closing here bounds fds to zero.
+        try? readHandle.close()
         return String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -80,7 +80,10 @@ struct ContentView: View {
                     }
                     .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
 
-                    Button { SpotifyBridge.playPause() } label: {
+                    Button {
+                        // Explicit play/pause so resume works even from Spotify's stopped state.
+                        if vm.isPlaying { SpotifyBridge.pause() } else { SpotifyBridge.play() }
+                    } label: {
                         Image(systemName: vm.isPlaying ? "pause.fill" : "play.fill")
                     }
                     .buttonStyle(ControlButtonStyle(size: 17, idleOpacity: 0.95))

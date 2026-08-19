@@ -33,7 +33,10 @@ class LyricsViewModel: ObservableObject {
 
     private func trackLoop() {
         while true {
-            checkTrack()
+            // Each iteration in its own pool: this loop never returns, so without an explicit
+            // pool the autoreleased Process/Pipe/Data objects from the osascript calls would
+            // pile up forever (fd + memory leak) and eventually wedge the app.
+            autoreleasepool { checkTrack() }
             Thread.sleep(forTimeInterval: 0.8)
         }
     }
@@ -132,7 +135,7 @@ class LyricsViewModel: ObservableObject {
 
     private func positionLoop() {
         while true {
-            updatePosition()
+            autoreleasepool { updatePosition() }
             Thread.sleep(forTimeInterval: 0.4)
         }
     }
