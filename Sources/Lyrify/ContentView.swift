@@ -14,9 +14,12 @@ struct VisualEffectView: NSViewRepresentable {
 
 struct ContentView: View {
     @ObservedObject var vm: LyricsViewModel
+    @State private var plainScrollSpeed = 1.0
+    @State private var showScrollSpeed = false
 
     /// Identity of the currently displayed song. When it changes, the content crossfades.
-    private var songKey: String { "\(vm.trackTitle)\u{1F}\(vm.trackArtist)" }
+    private var songKey: String { vm.trackKey }
+    private var hasPlainLyrics: Bool { vm.lines.isEmpty && !vm.plainLyricLines.isEmpty }
 
     var body: some View {
         ZStack {
@@ -51,9 +54,9 @@ struct ContentView: View {
 
                         if !vm.lines.isEmpty {
                             lyricsView
-                        } else if !vm.plainLyricLines.isEmpty {
+                        } else if hasPlainLyrics {
                             // Unsynced lyrics: auto-scroll at an estimated pace (see PlainLyricsView).
-                            PlainLyricsView(vm: vm)
+                            PlainLyricsView(vm: vm, speed: plainScrollSpeed)
                         } else {
                             // Status text only ("Loading…", "Waiting…", "No lyrics found.").
                             ScrollView(.vertical, showsIndicators: false) {
@@ -94,12 +97,47 @@ struct ContentView: View {
                         Image(systemName: "forward.fill")
                     }
                     .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
+
                     Spacer()
+                }
+                .overlay(alignment: .trailing) {
+                    if hasPlainLyrics {
+                        Button { showScrollSpeed.toggle() } label: {
+                            Image(systemName: "speedometer")
+                        }
+                        .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
+                        .help("Plain lyrics scroll speed")
+                        .padding(.trailing, 2)
+                        .popover(isPresented: $showScrollSpeed, arrowEdge: .top) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Scroll speed: \(Int((plainScrollSpeed * 100).rounded()))%")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Slider(value: $plainScrollSpeed, in: 0.75...1.25, step: 0.05)
+                                    .accessibilityLabel("Plain lyrics scroll speed")
+                                HStack {
+                                    Text("Slower")
+                                    Spacer()
+                                    Text("Faster")
+                                }
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(12)
+                            .frame(width: 220)
+                        }
+                    }
                 }
                 .padding(.vertical, 8)
             }
         }
         .preferredColorScheme(.dark)
+        .onChange(of: songKey) { _ in
+            plainScrollSpeed = 1
+            showScrollSpeed = false
+        }
+        .onChange(of: hasPlainLyrics) { hasLyrics in
+            if !hasLyrics { showScrollSpeed = false }
+        }
     }
 
     private var lyricsView: some View {
@@ -150,6 +188,7 @@ struct ContentView: View {
 /// backs off for a few seconds so you can read ahead, then re-syncs.
 private struct PlainLyricsView: View {
     @ObservedObject var vm: LyricsViewModel
+    let speed: Double
 
     /// How long auto-scroll stays out of the way after a manual scroll.
     private static let manualPause: TimeInterval = 4
@@ -191,6 +230,9 @@ private struct PlainLyricsView: View {
             .onChange(of: vm.plainProgress) { _ in
                 autoScroll(proxy, animated: true)
             }
+            .onChange(of: speed) { _ in
+                autoScroll(proxy, animated: true)
+            }
             .onAppear {
                 // A song already mid-play: jump to its estimated spot without animating.
                 // Deferred so the scroll view has laid out its rows before we target one.
@@ -202,7 +244,7 @@ private struct PlainLyricsView: View {
     private func autoScroll(_ proxy: ScrollViewProxy, animated: Bool) {
         guard Date() >= resumeAt else { return }   // user is reading — leave the scroll alone
         let target = PlainScroll.targetLine(progress: vm.plainProgress,
-                                            lineCount: vm.plainLyricLines.count)
+                                            lineCount: vm.plainLyricLines.count, speed: speed)
         // Suppress the self-inflicted offset changes this scroll produces (window > animation).
         programmaticUntil = Date().addingTimeInterval(0.7)
         let anchor = UnitPoint(x: 0.5, y: 0.4)

@@ -64,6 +64,7 @@ Leave `config.json` out and the feature stays off — the app works exactly as b
 | Play / pause | Spacebar (when Lyrify is focused), or the center button |
 | Previous / next track | ⏮ / ⏭ buttons |
 | Jump to a lyric | Click any line — seeks Spotify to that timestamp |
+| Adjust plain-lyrics scroll speed | Click the speedometer at bottom right; choose 75–125% (resets for each song) |
 | Resize | Drag any window edge |
 | Move | Drag anywhere on the window |
 

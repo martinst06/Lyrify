@@ -18,10 +18,12 @@ enum PlainScroll {
 
     /// Line index to scroll to for a given `progress`, clamped to a valid index of a
     /// `lineCount`-length list. An empty list scrolls to `0`.
-    static func targetLine(progress: Double, lineCount: Int) -> Int {
+    static func targetLine(progress: Double, lineCount: Int, speed: Double = 1) -> Int {
         guard lineCount > 1 else { return 0 }
         let clamped = min(max(progress, 0), 1)
-        let index = (clamped * Double(lineCount - 1)).rounded()
+        // Change mid-song pace without skipping the final line at the end.
+        let adjusted = pow(clamped, 1 / speed)
+        let index = (adjusted * Double(lineCount - 1)).rounded()
         return min(max(Int(index), 0), lineCount - 1)
     }
 }

@@ -6,6 +6,7 @@ class LyricsViewModel: ObservableObject {
     @Published var statusMessage: String = "Waiting for Spotify…"
     @Published var trackTitle: String = ""
     @Published var trackArtist: String = ""
+    @Published var trackKey: String = ""
     @Published var isPlaying: Bool = false
 
     // Unsynced (plain-text) lyrics from LRCLIB-plain or Genius. Split into display lines so the
@@ -54,12 +55,15 @@ class LyricsViewModel: ObservableObject {
             if had {
                 setLines([])
                 setPlain(nil)
-                main { self.statusMessage = "Waiting for Spotify…" }
+                main {
+                    self.trackKey = ""
+                    self.statusMessage = "Waiting for Spotify…"
+                }
             }
             return
         }
 
-        let key = "\(info.title)|\(info.artist)"
+        let key = info.identity
         stateLock.lock(); let changed = key != currentKey; if changed { currentKey = key }; stateLock.unlock()
         guard changed else { return }
 
@@ -69,6 +73,7 @@ class LyricsViewModel: ObservableObject {
         main {
             self.trackTitle = info.title
             self.trackArtist = info.artist
+            self.trackKey = key
             self.statusMessage = "Loading…"
         }
 

@@ -8,6 +8,8 @@ struct SpotifyTrackInfo {
     let position: Double
     let trackId: String
     let isPlaying: Bool
+
+    var identity: String { "\(trackId)\u{1F}\(title)\u{1F}\(artist)" }
 }
 
 struct SpotifyBridge {

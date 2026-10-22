@@ -72,6 +72,22 @@ final class QueueParsingTests: XCTestCase {
     }
 }
 
+final class TrackIdentityTests: XCTestCase {
+    private func track(id: String, position: Double = 0) -> SpotifyTrackInfo {
+        SpotifyTrackInfo(title: "Song", artist: "Artist", album: "Album",
+                         durationMs: 180_000, position: position, trackId: id, isPlaying: true)
+    }
+
+    func testSameTitleAndArtistWithDifferentSpotifyIDsAreDifferentTracks() {
+        XCTAssertNotEqual(track(id: "first").identity, track(id: "second").identity)
+    }
+
+    func testPlaybackPositionDoesNotChangeTrackIdentity() {
+        XCTAssertEqual(track(id: "first", position: 5).identity,
+                       track(id: "first", position: 100).identity)
+    }
+}
+
 final class PlainScrollTests: XCTestCase {
     // ── progress(positionSec:durationMs:) — playback fraction, clamped 0...1 ──
 
@@ -113,6 +129,17 @@ final class PlainScrollTests: XCTestCase {
         XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 11), 5)
         // 0.5 * (10 - 1) = 4.5 → rounds to 5 (round-half-up)
         XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 10), 5)
+    }
+
+    func testFasterSpeedMovesFurtherThroughPlainLyrics() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 11, speed: 1.2), 6)
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.9, lineCount: 11, speed: 1.25), 9)
+        XCTAssertEqual(PlainScroll.targetLine(progress: 1, lineCount: 11, speed: 1.25), 10)
+    }
+
+    func testSlowerSpeedLeavesMorePlainLyricsForLater() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 11, speed: 0.8), 4)
+        XCTAssertEqual(PlainScroll.targetLine(progress: 1, lineCount: 11, speed: 0.75), 10)
     }
 
     func testTargetLineClampsWithinBounds() {
