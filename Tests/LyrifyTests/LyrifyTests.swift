@@ -165,3 +165,23 @@ final class HTTPRequestParsingTests: XCTestCase {
         XCTAssertNil(SpotifyAuth.queryValue(req, "code"))
     }
 }
+
+final class GeniusMatchTests: XCTestCase {
+    func testSameTitleByDifferentArtistIsRejected() {
+        let score = GeniusService.matchScore(candidateTitle: "Danger Stranger", candidateArtist: "Esther",
+                                             wantTitle: "Danger", wantArtist: "Strajk")
+        XCTAssertLessThan(score, 0.5)
+    }
+
+    func testSameTitleAndArtistIsAccepted() {
+        let score = GeniusService.matchScore(candidateTitle: "Nostalgija", candidateArtist: "Strajk",
+                                             wantTitle: "Nostalgija", wantArtist: "Strajk")
+        XCTAssertGreaterThanOrEqual(score, 0.5)
+    }
+
+    func testArtistMatchIgnoresPunctuationAndCollaborators() {
+        let score = GeniusService.matchScore(candidateTitle: "Mila", candidateArtist: "Coby, Senidah",
+                                             wantTitle: "Mila", wantArtist: "Coby & Senidah")
+        XCTAssertGreaterThanOrEqual(score, 0.5)
+    }
+}

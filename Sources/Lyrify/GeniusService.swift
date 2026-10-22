@@ -103,22 +103,21 @@ enum GeniusService {
 
     // MARK: - Matching
 
-    /// 0…1 confidence that a Genius hit is the track we're after. Weighs how many of the
-    /// wanted title words appear in the candidate title (0.7) plus whether any artist word
-    /// overlaps (0.3). Both sides are normalized (lowercased, diacritics/punctuation
-    /// stripped) so "Coby & Senidah" matches "Coby, Senidah".
+    /// 0…1 confidence that a Genius hit is the track we're after. 0 unless some artist word
+    /// overlaps — a same-titled song by someone else is the wrong song. Otherwise 0.3 plus
+    /// 0.7 × the share of wanted title words found in the candidate title. Both sides are
+    /// normalized (lowercased, diacritics/punctuation stripped) so "Coby & Senidah" matches
+    /// "Coby, Senidah".
     static func matchScore(candidateTitle: String, candidateArtist: String,
                            wantTitle: String, wantArtist: String) -> Double {
         let want = tokens(wantTitle)
         guard !want.isEmpty else { return 0 }
-        let cand = tokens(candidateTitle)
-        let titleScore = Double(want.intersection(cand).count) / Double(want.count)
 
         let wantArt = tokens(wantArtist)
-        let candArt = tokens(candidateArtist)
-        let artistScore = wantArt.isEmpty || !wantArt.isDisjoint(with: candArt) ? 1.0 : 0.0
+        guard wantArt.isEmpty || !wantArt.isDisjoint(with: tokens(candidateArtist)) else { return 0 }
 
-        return titleScore * 0.7 + artistScore * 0.3
+        let titleScore = Double(want.intersection(tokens(candidateTitle)).count) / Double(want.count)
+        return titleScore * 0.7 + 0.3
     }
 
     /// Normalized word set: fold diacritics, lowercase, drop anything non-alphanumeric.
