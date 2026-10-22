@@ -49,9 +49,13 @@ struct ContentView: View {
                                 .background(Color.white.opacity(0.1))
                         }
 
-                        if vm.lines.isEmpty {
-                            // Scrollable: when there's no synced LRC we show the full plain
-                            // lyrics here, which overflow a short window.
+                        if !vm.lines.isEmpty {
+                            lyricsView
+                        } else if !vm.plainLyricLines.isEmpty {
+                            // Unsynced lyrics: auto-scroll at an estimated pace (see PlainLyricsView).
+                            PlainLyricsView(vm: vm)
+                        } else {
+                            // Status text only ("Loading…", "Waiting…", "No lyrics found.").
                             ScrollView(.vertical, showsIndicators: false) {
                                 Text(vm.statusMessage)
                                     .font(.system(size: 13, weight: .medium))
@@ -61,8 +65,6 @@ struct ContentView: View {
                                     .padding(24)
                             }
                             .frame(maxHeight: .infinity)
-                        } else {
-                            lyricsView
                         }
                     }
                     .id(songKey)
@@ -139,6 +141,93 @@ struct ContentView: View {
             }
         }
     }
+}
+
+/// Unsynced lyrics view. LRCLIB-plain and Genius text carry no timestamps, so instead of
+/// staying static this drifts down at an estimated pace: `vm.plainProgress` (playback
+/// fraction) maps onto the line count. The estimate is deliberately rough — no highlight,
+/// no click-to-seek — but it keeps the words moving with the song. If you scroll by hand it
+/// backs off for a few seconds so you can read ahead, then re-syncs.
+private struct PlainLyricsView: View {
+    @ObservedObject var vm: LyricsViewModel
+
+    /// How long auto-scroll stays out of the way after a manual scroll.
+    private static let manualPause: TimeInterval = 4
+
+    @State private var lastOffset: CGFloat? = nil
+    // Offset changes we cause ourselves (the programmatic scroll animation) must not be
+    // mistaken for the user scrolling; ignore offset reports until this moment.
+    @State private var programmaticUntil = Date.distantPast
+    // Auto-scroll is suppressed until here after the user scrolls by hand.
+    @State private var resumeAt = Date.distantPast
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(vm.plainLyricLines.enumerated()), id: \.offset) { idx, line in
+                        Text(line)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .id(idx)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: PlainScrollOffsetKey.self,
+                            value: geo.frame(in: .named("plainScroll")).minY)
+                    }
+                )
+            }
+            .coordinateSpace(name: "plainScroll")
+            .onPreferenceChange(PlainScrollOffsetKey.self) { offset in
+                handleOffset(offset)
+            }
+            .onChange(of: vm.plainProgress) { _ in
+                autoScroll(proxy, animated: true)
+            }
+            .onAppear {
+                // A song already mid-play: jump to its estimated spot without animating.
+                // Deferred so the scroll view has laid out its rows before we target one.
+                DispatchQueue.main.async { autoScroll(proxy, animated: false) }
+            }
+        }
+    }
+
+    private func autoScroll(_ proxy: ScrollViewProxy, animated: Bool) {
+        guard Date() >= resumeAt else { return }   // user is reading — leave the scroll alone
+        let target = PlainScroll.targetLine(progress: vm.plainProgress,
+                                            lineCount: vm.plainLyricLines.count)
+        // Suppress the self-inflicted offset changes this scroll produces (window > animation).
+        programmaticUntil = Date().addingTimeInterval(0.7)
+        let anchor = UnitPoint(x: 0.5, y: 0.4)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.45)) { proxy.scrollTo(target, anchor: anchor) }
+        } else {
+            proxy.scrollTo(target, anchor: anchor)
+        }
+    }
+
+    private func handleOffset(_ offset: CGFloat) {
+        defer { lastOffset = offset }
+        guard let last = lastOffset else { return }        // first sample: just record the baseline
+        guard Date() >= programmaticUntil else { return }  // our own scroll, not the user's
+        if abs(offset - last) > 1 {
+            resumeAt = Date().addingTimeInterval(Self.manualPause)
+        }
+    }
+}
+
+/// Reports the plain-lyrics scroll offset (content top's y in the scroll coordinate space)
+/// so `PlainLyricsView` can tell a manual scroll from its own programmatic one.
+private struct PlainScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 /// Playback-control button: brightens, grows, and shows a circular highlight on

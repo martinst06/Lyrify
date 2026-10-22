@@ -72,6 +72,60 @@ final class QueueParsingTests: XCTestCase {
     }
 }
 
+final class PlainScrollTests: XCTestCase {
+    // ── progress(positionSec:durationMs:) — playback fraction, clamped 0...1 ──
+
+    func testProgressMidpoint() {
+        XCTAssertEqual(PlainScroll.progress(positionSec: 100, durationMs: 200_000), 0.5, accuracy: 1e-9)
+    }
+
+    func testProgressAtStartIsZero() {
+        XCTAssertEqual(PlainScroll.progress(positionSec: 0, durationMs: 200_000), 0)
+    }
+
+    func testProgressClampsAboveOne() {
+        // Position past the reported duration (Spotify occasionally over-reports) stays at 1.
+        XCTAssertEqual(PlainScroll.progress(positionSec: 500, durationMs: 200_000), 1)
+    }
+
+    func testProgressClampsBelowZero() {
+        XCTAssertEqual(PlainScroll.progress(positionSec: -5, durationMs: 200_000), 0)
+    }
+
+    func testProgressZeroDurationIsZero() {
+        // Guards divide-by-zero for a not-yet-loaded / malformed duration.
+        XCTAssertEqual(PlainScroll.progress(positionSec: 100, durationMs: 0), 0)
+        XCTAssertEqual(PlainScroll.progress(positionSec: 100, durationMs: -1), 0)
+    }
+
+    // ── targetLine(progress:lineCount:) — line index to scroll to ──
+
+    func testTargetLineAtStart() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0, lineCount: 10), 0)
+    }
+
+    func testTargetLineAtEnd() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 1, lineCount: 10), 9)
+    }
+
+    func testTargetLineMidpointRounds() {
+        // 0.5 * (11 - 1) = 5.0
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 11), 5)
+        // 0.5 * (10 - 1) = 4.5 → rounds to 5 (round-half-up)
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.5, lineCount: 10), 5)
+    }
+
+    func testTargetLineClampsWithinBounds() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 1.5, lineCount: 10), 9)
+        XCTAssertEqual(PlainScroll.targetLine(progress: -0.5, lineCount: 10), 0)
+    }
+
+    func testTargetLineEmptyOrSingle() {
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.7, lineCount: 0), 0)
+        XCTAssertEqual(PlainScroll.targetLine(progress: 0.7, lineCount: 1), 0)
+    }
+}
+
 final class HTTPRequestParsingTests: XCTestCase {
     func testExtractsCodeAndState() {
         let req = "GET /callback?code=AQ-abc_123&state=xyz HTTP/1.1\r\nHost: 127.0.0.1:8888\r\n\r\n"

@@ -79,7 +79,7 @@ Edit `Sources/Lyrify/ContentView.swift` for fonts, colors, and spacing. After an
 
 Lyrics are fetched from [LRCLIB](https://lrclib.net) — a free, community-maintained synced lyrics database. The app searches for a synced version first; if none exists it uses LRCLIB's plain text.
 
-If LRCLIB has nothing at all, Lyrify falls back to [Genius](https://genius.com). Genius has no lyrics API, so the words are read from the song page — that means **plain text only**: it displays as a scrollable block that doesn't auto-scroll or click-to-seek (Genius has no timestamps). Only songs LRCLIB completely misses ever hit Genius; everything else is unchanged. If Genius has nothing either, you get "No lyrics found."
+If LRCLIB has nothing at all, Lyrify falls back to [Genius](https://genius.com). Genius has no lyrics API, so the words are read from the song page — that means **plain text only**. Since there are no timestamps, Lyrify can't highlight the exact current line, but it still auto-scrolls the block at an *estimated* pace (spreading the lines evenly across the song's length) so the words drift along with the music; scroll by hand and it pauses briefly so you can read ahead, then re-syncs. There's no click-to-seek for plain lyrics. Only songs LRCLIB completely misses ever hit Genius; everything else is unchanged. If Genius has nothing either, you get "No lyrics found."
 
 ### Optional: sharper Genius matching (Genius API token)
 

@@ -8,6 +8,12 @@ class LyricsViewModel: ObservableObject {
     @Published var trackArtist: String = ""
     @Published var isPlaying: Bool = false
 
+    // Unsynced (plain-text) lyrics from LRCLIB-plain or Genius. Split into display lines so the
+    // view can auto-scroll by line count; `plainProgress` (0...1) is the estimated playback
+    // fraction the view maps onto those lines. Empty/`0` unless a plain result is showing.
+    @Published var plainLyricLines: [String] = []
+    @Published var plainProgress: Double = 0
+
     // The background loops read these snapshots under `stateLock` instead of hopping onto
     // the main thread. `DispatchQueue.main.sync` on a 0.4s loop is a deadlock waiting to
     // happen; the snapshots stay in lock-step with the @Published values (see `setLines`/
@@ -17,6 +23,7 @@ class LyricsViewModel: ObservableObject {
     private var linesSnapshot: [LRCLine] = []
     private var activeIndexSnapshot = -1
     private var isPlayingSnapshot = false
+    private var hasPlainSnapshot = false
     private var lastPreloadedKey = ""
 
     // Lyrics fetching blocks (up to the LRCLIB timeout). It runs on its own serial queue so
@@ -46,6 +53,7 @@ class LyricsViewModel: ObservableObject {
             stateLock.lock(); let had = !currentKey.isEmpty; if had { currentKey = "" }; stateLock.unlock()
             if had {
                 setLines([])
+                setPlain(nil)
                 main { self.statusMessage = "Waiting for Spotify…" }
             }
             return
@@ -57,6 +65,7 @@ class LyricsViewModel: ObservableObject {
 
         setLines([])
         setActiveIndex(-1)
+        setPlain(nil)
         main {
             self.trackTitle = info.title
             self.trackArtist = info.artist
@@ -100,7 +109,9 @@ class LyricsViewModel: ObservableObject {
                 // Progressive display: show plain text the moment it's available, while the
                 // synced version is still loading, instead of sitting on "Loading…".
                 guard let self = self, self.isCurrent(key) else { return }
-                self.main { if self.lines.isEmpty { self.statusMessage = plain } }
+                self.stateLock.lock(); let hasSynced = !self.linesSnapshot.isEmpty; self.stateLock.unlock()
+                guard !hasSynced else { return }
+                self.setPlain(plain)
             }
         )
 
@@ -111,10 +122,15 @@ class LyricsViewModel: ObservableObject {
 
         if let synced = result.synced {
             let parsed = LRCParser.parse(synced)
-            if !parsed.isEmpty { setLines(parsed); return }
+            if !parsed.isEmpty { setPlain(nil); setLines(parsed); return }
         }
         setLines([])
-        main { self.statusMessage = result.plain ?? "No lyrics found." }
+        if let plain = result.plain {
+            setPlain(plain)
+        } else {
+            setPlain(nil)
+            main { self.statusMessage = "No lyrics found." }
+        }
     }
 
     private func isCurrent(_ key: String) -> Bool {
@@ -147,6 +163,7 @@ class LyricsViewModel: ObservableObject {
         let lines = linesSnapshot
         let current = activeIndexSnapshot
         let wasPlaying = isPlayingSnapshot
+        let hasPlain = hasPlainSnapshot
         stateLock.unlock()
 
         // Reconcile play/pause every tick, even with no lyrics. This used to sit *after* the
@@ -156,13 +173,24 @@ class LyricsViewModel: ObservableObject {
             main { self.isPlaying = info.isPlaying }
         }
 
-        guard !lines.isEmpty else { return }
-
-        var idx = -1
-        for line in lines {
-            if line.time <= info.position { idx = line.id } else { break }
+        // Synced lyrics: highlight the current line by timestamp.
+        if !lines.isEmpty {
+            var idx = -1
+            for line in lines {
+                if line.time <= info.position { idx = line.id } else { break }
+            }
+            if idx != current { setActiveIndex(idx) }
+            return
         }
-        if idx != current { setActiveIndex(idx) }
+
+        // Plain (unsynced) lyrics: no timestamps, so publish the estimated playback fraction
+        // and let the view auto-scroll. The value only moves while playing (position advances),
+        // so scrolling naturally freezes on pause. Guard the write so a static value (paused)
+        // doesn't churn the publisher and retrigger the view's scroll every tick.
+        if hasPlain {
+            let p = PlainScroll.progress(positionSec: info.position, durationMs: info.durationMs)
+            main { if self.plainProgress != p { self.plainProgress = p } }
+        }
     }
 
     // ── State setters: keep the @Published value (UI) and the snapshot (loops) in sync ──
@@ -170,6 +198,23 @@ class LyricsViewModel: ObservableObject {
     private func setLines(_ value: [LRCLine]) {
         stateLock.lock(); linesSnapshot = value; stateLock.unlock()
         main { self.lines = value }
+    }
+
+    /// Set (or clear, with `nil`) the plain-text lyrics. Splits into display lines, dropping
+    /// blank lines at the top and bottom so the pace estimate maps onto real words, not empty
+    /// padding. Clearing also resets `plainProgress` so a new song starts scrolled to the top.
+    private func setPlain(_ text: String?) {
+        var lines: [String] = []
+        if let text = text {
+            lines = text.components(separatedBy: .newlines)
+            while let first = lines.first, first.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeFirst() }
+            while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
+        }
+        stateLock.lock(); hasPlainSnapshot = !lines.isEmpty; stateLock.unlock()
+        main {
+            self.plainLyricLines = lines
+            if lines.isEmpty { self.plainProgress = 0 }
+        }
     }
 
     private func setActiveIndex(_ value: Int) {

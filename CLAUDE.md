@@ -13,8 +13,9 @@ A macOS floating lyrics window for Spotify. SwiftUI, Swift package, no external 
 | `Sources/Lyrify/LyricsService.swift` | LRCLIB fetch — exact match (`/api/get`), then search (`/api/search`) with synced-first, closest-duration tiebreak; falls through to `GeniusService` when LRCLIB has nothing |
 | `Sources/Lyrify/GeniusService.swift` | Last-resort **plain-text** fallback — finds the song via Genius search (official API if `geniusToken` set, else public web search) and scrapes lyrics from the page HTML |
 | `Sources/Lyrify/LRCParser.swift` | Parses `[mm:ss.xx]` LRC timestamps into `[LRCLine]` |
-| `Sources/Lyrify/LyricsViewModel.swift` | Poll loops (track change 0.8s, position sync 0.4s), `seek(to:)`, next-track lyric preload |
-| `Sources/Lyrify/ContentView.swift` | SwiftUI view — lyrics scroll, playback controls, hover cursor, click-to-seek |
+| `Sources/Lyrify/PlainScroll.swift` | Pure pace math for unsynced lyrics: playback fraction + target line index (unit-tested) |
+| `Sources/Lyrify/LyricsViewModel.swift` | Poll loops (track change 0.8s, position sync 0.4s), `seek(to:)`, next-track lyric preload, plain-lyric progress |
+| `Sources/Lyrify/ContentView.swift` | SwiftUI view — synced lyrics scroll + `PlainLyricsView` (estimated auto-scroll), playback controls, hover cursor, click-to-seek |
 | `Sources/Lyrify/SpotifyConfig.swift` | Reads optional `~/Library/Application Support/Lyrify/config.json` (`clientId`, `geniusToken`); absent ⇒ Web API off / Genius uses public search |
 | `Sources/Lyrify/SpotifyAuth.swift` | Spotify Web API OAuth (PKCE), loopback callback, token store/refresh (`tokens.json`, 0600) |
 | `Sources/Lyrify/SpotifyWebAPI.swift` | `GET /me/player/queue` → next track, used only to preload lyrics |
@@ -68,7 +69,8 @@ python3 app/make-icon.py   # overwrites app/AppIcon.icns + app/icon-1024.png
 ## Key design decisions
 
 - **LRCLIB is the primary source** (no Musixmatch, no Spotify internal endpoint). Free, legit, no API key, and the only source of *synced* lyrics. Coverage is patchier for non-English/folk tracks but the matching logic is tuned to find synced versions LRCLIB does have.
-- **Genius is a last-resort, plain-text-only fallback** (`GeniusService`), tried only when LRCLIB returns nothing. Genius has no lyrics-in-API, so the words are scraped from the song page HTML — hence unsynced (no auto-scroll / click-to-seek), rendered through the same plain-text path as an LRCLIB plain result. Fragile by nature (breaks if Genius changes its markup) and ToS-gray; kept for personal-use coverage of tracks LRCLIB misses. Optional `geniusToken` only improves the song-matching step, never returns lyrics itself. Scrape targets `<div data-lyrics-container>` and drops `data-exclude-from-selection` chrome subtrees.
+- **Genius is a last-resort, plain-text-only fallback** (`GeniusService`), tried only when LRCLIB returns nothing. Genius has no lyrics-in-API, so the words are scraped from the song page HTML — unsynced, rendered through the same plain-text path as an LRCLIB plain result. Fragile by nature (breaks if Genius changes its markup) and ToS-gray; kept for personal-use coverage of tracks LRCLIB misses. Optional `geniusToken` only improves the song-matching step, never returns lyrics itself. Scrape targets `<div data-lyrics-container>` and drops `data-exclude-from-selection` chrome subtrees.
+- **Plain (unsynced) lyrics auto-scroll on an estimate, not timestamps** (`PlainScroll` + `PlainLyricsView`). With no per-line timing there's nothing to highlight or seek to, so the whole block drifts down at a rate assuming the lines are spread evenly across the song: `plainProgress` (playback fraction, published by the position loop) → target line index. It's deliberately rough (intros/outros/instrumentals throw it off). A manual scroll suppresses the auto-scroll for ~4s (`PlainLyricsView` tells its own programmatic scroll from a user scroll via a `GeometryReader` offset + a short "programmatic" window), then it re-syncs. No click-to-seek for plain lines.
 - **Ad-hoc codesigned bundle**. Locally built so no quarantine. No Apple Developer account needed.
 - **`build-app.sh` is the canonical way to install**, not `sudo cp`. It handles the full bundle assembly including icon.
 
