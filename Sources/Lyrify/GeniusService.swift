@@ -18,13 +18,8 @@ enum GeniusService {
     /// Returns scraped plain lyrics for the best-matching Genius song, or nil when
     /// nothing matches confidently / the page can't be scraped.
     static func fetchPlain(title: String, artist: String) -> String? {
-        guard let hit = findSong(title: title, artist: artist) else { return nil }
-        // Genius search happily returns *a* song even for a bad query. Only trust a hit
-        // whose title/artist actually resemble the track — otherwise we'd paste some
-        // unrelated song's lyrics over the current one.
-        guard matchScore(candidateTitle: hit.title, candidateArtist: hit.artist,
-                         wantTitle: title, wantArtist: artist) >= 0.5 else { return nil }
-        guard let html = fetchText(hit.url) else { return nil }
+        guard let hit = findSong(title: title, artist: artist),
+              let html = fetchText(hit.url) else { return nil }
         let lyrics = scrapeLyrics(from: html)
         return (lyrics?.isEmpty ?? true) ? nil : lyrics
     }
@@ -34,7 +29,7 @@ enum GeniusService {
     private struct Hit { let title: String; let artist: String; let url: URL }
 
     private static func findSong(title: String, artist: String) -> Hit? {
-        let query = "\(title) \(artist)"
+        let query = "\(bareTitle(title)) \(artist)"
         let results: [[String: Any]]
         if let token = SpotifyConfig.geniusToken {
             results = officialSearch(query: query, token: token)
@@ -42,15 +37,13 @@ enum GeniusService {
             results = publicSearch(query: query)
         }
 
-        // Pick the result whose title+artist best matches the track.
-        var best: (hit: Hit, score: Double)?
-        for r in results {
-            guard let hit = hit(from: r) else { continue }
-            let score = matchScore(candidateTitle: hit.title, candidateArtist: hit.artist,
-                                   wantTitle: title, wantArtist: artist)
-            if best == nil || score > best!.score { best = (hit, score) }
+        // Genius search happily returns *a* song even for a bad query. Take the most
+        // relevant hit that really is this track, or nothing — never paste some unrelated
+        // song's lyrics over the current one.
+        return results.lazy.compactMap(hit(from:)).first {
+            isMatch(candidateTitle: $0.title, candidateArtist: $0.artist,
+                    wantTitle: title, wantArtist: artist)
         }
-        return best?.hit
     }
 
     /// Official API: `{ "response": { "hits": [ { "result": {…} } ] } }` (Bearer auth).
@@ -97,36 +90,52 @@ enum GeniusService {
     private static func hit(from result: [String: Any]) -> Hit? {
         guard let title = result["title"] as? String,
               let urlString = result["url"] as? String, let url = URL(string: urlString) else { return nil }
-        let artist = (result["primary_artist"] as? [String: Any])?["name"] as? String ?? ""
+        // `artist_names` also credits collaborators ("Rihanna (Ft. Drake)"); primary_artist
+        // is only the lead.
+        let artist = result["artist_names"] as? String
+            ?? (result["primary_artist"] as? [String: Any])?["name"] as? String ?? ""
         return Hit(title: title, artist: artist, url: url)
     }
 
     // MARK: - Matching
 
-    /// 0…1 confidence that a Genius hit is the track we're after. 0 unless some artist word
-    /// overlaps — a same-titled song by someone else is the wrong song. Otherwise 0.3 plus
-    /// 0.7 × the share of wanted title words found in the candidate title. Both sides are
-    /// normalized (lowercased, diacritics/punctuation stripped) so "Coby & Senidah" matches
-    /// "Coby, Senidah".
-    static func matchScore(candidateTitle: String, candidateArtist: String,
-                           wantTitle: String, wantArtist: String) -> Double {
-        let want = tokens(wantTitle)
-        guard !want.isEmpty else { return 0 }
-
-        let wantArt = tokens(wantArtist)
-        guard wantArt.isEmpty || !wantArt.isDisjoint(with: tokens(candidateArtist)) else { return 0 }
-
-        let titleScore = Double(want.intersection(tokens(candidateTitle)).count) / Double(want.count)
-        return titleScore * 0.7 + 0.3
+    /// Whether a Genius hit is the track we're after: the whole title must match and at
+    /// least one whole artist name must be shared, so "Danger" ≠ "Danger Stranger" and
+    /// "The Weeknd" ≠ "The Killers". Case, diacritics and punctuation are ignored.
+    static func isMatch(candidateTitle: String, candidateArtist: String,
+                        wantTitle: String, wantArtist: String) -> Bool {
+        let want = normalized(bareTitle(wantTitle))
+        guard !want.isEmpty, normalized(bareTitle(candidateTitle)) == want else { return false }
+        let wantArtists = artistNames(wantArtist)
+        return wantArtists.isEmpty || !wantArtists.isDisjoint(with: artistNames(candidateArtist))
     }
 
-    /// Normalized word set: fold diacritics, lowercase, drop anything non-alphanumeric.
-    private static func tokens(_ s: String) -> Set<String> {
+    /// The bare song name: drops a " - Remastered 2011"-style suffix and "(feat. …)" /
+    /// "[Live]" groups, which Spotify and Genius word differently (and which derail Genius
+    /// search). Falls back to the whole title when that leaves nothing, e.g. "(Untitled)".
+    static func bareTitle(_ title: String) -> String {
+        let stripped = title
+            .replacingOccurrences(of: #"\s[-–—]\s.*$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\([^)]*\)|\[[^\]]*\]"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return normalized(stripped).isEmpty ? title : stripped
+    }
+
+    /// Each artist in a credit: "Queen & David Bowie", "Coby, Senidah" and
+    /// "Rihanna (Ft. Drake)" all split into their individual names.
+    private static func artistNames(_ credit: String) -> Set<String> {
+        let split = credit.replacingOccurrences(of: #"[,&()]|\b(?:feat|ft|featuring|x)\b\.?"#,
+                                                with: "|", options: [.regularExpression, .caseInsensitive])
+        return Set(split.split(separator: "|").map { normalized(String($0)) }.filter { !$0.isEmpty })
+    }
+
+    /// Diacritic-folded, lowercased words joined by single spaces; punctuation dropped.
+    private static func normalized(_ s: String) -> String {
         let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
         let cleaned = folded.unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
         }
-        return Set(String(cleaned).split(separator: " ").map(String.init))
+        return String(cleaned).split(separator: " ").joined(separator: " ")
     }
 
     // MARK: - Scraping

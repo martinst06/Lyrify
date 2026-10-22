@@ -167,21 +167,54 @@ final class HTTPRequestParsingTests: XCTestCase {
 }
 
 final class GeniusMatchTests: XCTestCase {
+    private func matches(_ candTitle: String, _ candArtist: String, _ wantTitle: String, _ wantArtist: String) -> Bool {
+        GeniusService.isMatch(candidateTitle: candTitle, candidateArtist: candArtist,
+                              wantTitle: wantTitle, wantArtist: wantArtist)
+    }
+
     func testSameTitleByDifferentArtistIsRejected() {
-        let score = GeniusService.matchScore(candidateTitle: "Danger Stranger", candidateArtist: "Esther",
-                                             wantTitle: "Danger", wantArtist: "Strajk")
-        XCTAssertLessThan(score, 0.5)
+        XCTAssertFalse(matches("Danger", "Esther", "Danger", "Strajk"))
+    }
+
+    func testArtistsSharingOnlyAWordAreRejected() {
+        XCTAssertFalse(matches("Blinding Lights", "The Killers", "Blinding Lights", "The Weeknd"))
+    }
+
+    func testTitleContainingTheWantedTitleIsRejected() {
+        XCTAssertFalse(matches("Danger Stranger", "Strajk", "Danger", "Strajk"))
     }
 
     func testSameTitleAndArtistIsAccepted() {
-        let score = GeniusService.matchScore(candidateTitle: "Nostalgija", candidateArtist: "Strajk",
-                                             wantTitle: "Nostalgija", wantArtist: "Strajk")
-        XCTAssertGreaterThanOrEqual(score, 0.5)
+        XCTAssertTrue(matches("Nostalgija", "Strajk", "Nostalgija", "Strajk"))
     }
 
-    func testArtistMatchIgnoresPunctuationAndCollaborators() {
-        let score = GeniusService.matchScore(candidateTitle: "Mila", candidateArtist: "Coby, Senidah",
-                                             wantTitle: "Mila", wantArtist: "Coby & Senidah")
-        XCTAssertGreaterThanOrEqual(score, 0.5)
+    func testCaseDiacriticsAndPunctuationAreIgnored() {
+        XCTAssertTrue(matches("Štrajk!", "Hladno pivo", "strajk", "Hladno Pivo"))
+    }
+
+    func testVersionSuffixAndFeatureTagAreIgnored() {
+        XCTAssertTrue(matches("Song", "X", "Song - Remastered 2011", "X"))
+        XCTAssertTrue(matches("Work", "Rihanna", "Work (feat. Drake)", "Rihanna"))
+    }
+
+    func testCoverIsRejected() {
+        XCTAssertFalse(matches("Work (Rihanna Cover)", "Glamour", "Work", "Rihanna"))
+    }
+
+    func testAnyOneCollaboratorMatches() {
+        XCTAssertTrue(matches("Under Pressure", "Queen & David Bowie", "Under Pressure", "Queen"))
+        XCTAssertTrue(matches("Work", "Rihanna (Ft. Drake)", "Work", "Drake"))
+        XCTAssertTrue(matches("Mila", "Coby, Senidah", "Mila", "Coby & Senidah"))
+    }
+
+    func testBareTitleDropsVersionTagsForSearch() {
+        XCTAssertEqual(GeniusService.bareTitle("Under Pressure - Remastered 2011"), "Under Pressure")
+        XCTAssertEqual(GeniusService.bareTitle("Work (feat. Drake)"), "Work")
+        XCTAssertEqual(GeniusService.bareTitle("(Untitled)"), "(Untitled)")
+    }
+
+    func testFullyParenthesizedTitleStillMatches() {
+        XCTAssertTrue(matches("(Untitled)", "X", "(Untitled)", "X"))
+        XCTAssertFalse(matches("(Untitled)", "X", "(Something Else)", "X"))
     }
 }
