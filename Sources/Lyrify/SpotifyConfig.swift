@@ -13,6 +13,8 @@ enum SpotifyConfig {
             .appendingPathComponent("Lyrify", isDirectory: true)
     }
 
+    static var configURL: URL { supportDir.appendingPathComponent("config.json") }
+
     static var clientId: String? {
         string(forKey: "clientId")
     }
@@ -23,9 +25,15 @@ enum SpotifyConfig {
         string(forKey: "geniusToken")
     }
 
+    /// Optional Spotify web-player `sp_dc` cookie. Absent ⇒ Spotify's own lyrics are skipped
+    /// and LRCLIB is the first source. Re-read on every login, so a replaced cookie is picked up
+    /// without restarting.
+    static var spDc: String? {
+        string(forKey: "spDc")
+    }
+
     private static func string(forKey key: String) -> String? {
-        let url = supportDir.appendingPathComponent("config.json")
-        guard let data = try? Data(contentsOf: url),
+        guard let data = try? Data(contentsOf: configURL),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let value = dict[key] as? String, !value.isEmpty else { return nil }
         return value

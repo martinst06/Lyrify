@@ -100,6 +100,22 @@ struct ContentView: View {
 
                     Spacer()
                 }
+                .overlay(alignment: .leading) {
+                    if let warning = vm.spotifyWarning {
+                        Button {
+                            if warning == .cookieRejected { NSWorkspace.shared.open(SpotifyConfig.configURL) }
+                        } label: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.yellow)
+                        }
+                        .buttonStyle(ControlButtonStyle(size: 13, idleOpacity: 0.55))
+                        .help(warning == .cookieRejected
+                              ? "Spotify lyrics paused: your sp_dc cookie expired or was signed out. Click to open config.json."
+                              : "Spotify lyrics paused: Spotify changed its web-player login. Lyrify needs an update; using LRCLIB meanwhile.")
+                        .accessibilityLabel("Spotify lyrics unavailable")
+                        .padding(.leading, 2)
+                    }
+                }
                 .overlay(alignment: .trailing) {
                     if hasPlainLyrics {
                         Button { showScrollSpeed.toggle() } label: {

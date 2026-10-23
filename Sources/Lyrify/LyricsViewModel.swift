@@ -14,6 +14,7 @@ class LyricsViewModel: ObservableObject {
     // fraction the view maps onto those lines. Empty/`0` unless a plain result is showing.
     @Published var plainLyricLines: [String] = []
     @Published var plainProgress: Double = 0
+    @Published var spotifyWarning: SpotifyLyricsWarning?
 
     // The background loops read these snapshots under `stateLock` instead of hopping onto
     // the main thread. `DispatchQueue.main.sync` on a 0.4s loop is a deadlock waiting to
@@ -98,7 +99,7 @@ class LyricsViewModel: ObservableObject {
 
             // Warm the cache; the result is discarded. Runs on the Web API queue, never the
             // detection loop, the position loop, or main.
-            _ = LyricsService.fetchSync(title: next.title, artist: next.artist,
+            _ = LyricsService.fetchSync(trackId: next.trackId, title: next.title, artist: next.artist,
                                         album: next.album, durationMs: next.durationMs)
         }
     }
@@ -108,7 +109,7 @@ class LyricsViewModel: ObservableObject {
         guard isCurrent(key) else { return }
 
         let result = LyricsService.fetchSync(
-            title: info.title, artist: info.artist,
+            trackId: info.trackId, title: info.title, artist: info.artist,
             album: info.album, durationMs: info.durationMs,
             onEarlyPlain: { [weak self] plain in
                 // Progressive display: show plain text the moment it's available, while the
@@ -119,6 +120,10 @@ class LyricsViewModel: ObservableObject {
                 self.setPlain(plain)
             }
         )
+
+        // Not per-song, so publish it even if the track changed while fetching.
+        let warning = SpotifyLyricsService.warning
+        main { if self.spotifyWarning != warning { self.spotifyWarning = warning } }
 
         // fetchSync blocked for up to a few seconds. If the user skipped tracks while it was
         // in flight, the live track no longer matches what we fetched — drop the stale result

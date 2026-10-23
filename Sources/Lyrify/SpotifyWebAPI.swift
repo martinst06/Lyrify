@@ -2,6 +2,7 @@ import Foundation
 
 /// Metadata for the song Spotify will play next, used only to warm `LyricsService`'s cache.
 struct NextTrack {
+    let trackId: String
     let title: String
     let artist: String
     let album: String
@@ -53,7 +54,7 @@ enum SpotifyWebAPI {
               let album = (item["album"] as? [String: Any])?["name"] as? String,
               let artist = (item["artists"] as? [[String: Any]])?.first?["name"] as? String
         else { return nil }
-        return NextTrack(title: title, artist: artist, album: album, durationMs: durationMs)
+        return NextTrack(trackId: item["id"] as? String ?? "", title: title, artist: artist, album: album, durationMs: durationMs)
     }
 
     private enum Resp { case ok(Data); case unauthorized; case other }

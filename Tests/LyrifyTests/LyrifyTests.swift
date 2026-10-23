@@ -70,6 +70,11 @@ final class QueueParsingTests: XCTestCase {
     func testEmptyQueueIsNil() {
         XCTAssertNil(SpotifyWebAPI.parseNext(queueJSON("")))
     }
+
+    func testParsesTrackIdForSpotifyLyricsPreload() {
+        let item = #"{"id":"4uLU6hMCjMI75M1A2tKUQC","name":"Song","duration_ms":210000,"album":{"name":"Album"},"artists":[{"name":"Artist"}]}"#
+        XCTAssertEqual(SpotifyWebAPI.parseNext(queueJSON(item))?.trackId, "4uLU6hMCjMI75M1A2tKUQC")
+    }
 }
 
 final class TrackIdentityTests: XCTestCase {
@@ -216,5 +221,110 @@ final class GeniusMatchTests: XCTestCase {
     func testFullyParenthesizedTitleStillMatches() {
         XCTAssertTrue(matches("(Untitled)", "X", "(Untitled)", "X"))
         XCTAssertFalse(matches("(Untitled)", "X", "(Something Else)", "X"))
+    }
+}
+
+final class SpotifyLoginCodeTests: XCTestCase {
+    // RFC 6238 Appendix B SHA-1 vectors, truncated to 6 digits (verified independently in Python).
+    private let rfcSecret = Data("12345678901234567890".utf8)
+
+    func testMatchesRFC6238Vectors() {
+        XCTAssertEqual(SpotifyLyricsService.totp(secret: rfcSecret, time: 59), "287082")
+        XCTAssertEqual(SpotifyLyricsService.totp(secret: rfcSecret, time: 1111111109), "081804")
+    }
+
+    func testDecodesPublishedSecretBytes() {
+        XCTAssertEqual(SpotifyLyricsService.decodeSecret([12, 56]), "550")   // 12^9, 56^10
+    }
+
+    func testSecretXorKeyWrapsEvery33Bytes() {
+        XCTAssertEqual(SpotifyLyricsService.decodeSecret(Array(repeating: 0, count: 34)),
+                       "910111213141516171819202122232425262728293031323334353637383940419")
+    }
+}
+
+final class SpotifyTokenResponseTests: XCTestCase {
+    private func parse(_ status: Int, _ body: String) -> SpotifyLyricsService.TokenResponse {
+        SpotifyLyricsService.parseToken(status: status, data: Data(body.utf8))
+    }
+
+    func testLoggedInTokenIsAccepted() {
+        let body = #"{"clientId":"d8a5ed958d274c2e8ee717e6a4b0971d","accessToken":"BQ123","accessTokenExpirationTimestampMs":1761220000000,"isAnonymous":false}"#
+        XCTAssertEqual(parse(200, body), .token("BQ123", expiresAt: Date(timeIntervalSince1970: 1_761_220_000)))
+    }
+
+    func testAnonymousTokenMeansCookieRejected() {
+        let body = #"{"clientId":"d8a5ed958d274c2e8ee717e6a4b0971d","accessToken":"BQanon","accessTokenExpirationTimestampMs":1761220000000,"isAnonymous":true}"#
+        XCTAssertEqual(parse(200, body), .cookieRejected)
+    }
+
+    // Observed 2026-10-23: an invalid sp_dc gets 401, a wrong TOTP gets 400.
+    func testUnauthorizedMeansCookieRejected() {
+        XCTAssertEqual(parse(401, #"{"error":{"code":401,"message":"Unauthorized","trace":"eyJ"}}"#), .cookieRejected)
+    }
+
+    func testErrorStatusMeansLoginRejected() {
+        XCTAssertEqual(parse(400, #"{"error":{"code":400,"message":"Unauthorized request"}}"#), .loginRejected)
+    }
+
+    func testNonJSONMeansLoginRejected() {
+        XCTAssertEqual(parse(200, "<html>Not found</html>"), .loginRejected)
+    }
+}
+
+final class SpotifyLyricsParsingTests: XCTestCase {
+    private func response(_ syncType: String, _ lines: [String]) -> Data {
+        Data(#"{"lyrics":{"syncType":"\#(syncType)","lines":[\#(lines.joined(separator: ","))],"provider":"MusixMatch","providerLyricsId":"1","providerDisplayName":"Musixmatch","syncLyricsUri":"","isDenseTypeface":false,"alternatives":[],"language":"mk","isRtlLanguage":false,"capStatus":"NONE","isSnippet":false},"colors":{"background":-9013642,"text":-16777216,"highlightText":-1},"hasVocalRemoval":false}"#.utf8)
+    }
+
+    private func line(_ startMs: String, _ words: String) -> String {
+        #"{"startTimeMs":"\#(startMs)","words":"\#(words)","syllables":[],"endTimeMs":"0"}"#
+    }
+
+    func testLineSyncedBecomesTimedLines() {
+        let r = SpotifyLyricsService.parseLyrics(response("LINE_SYNCED", [line("1000", "First"), line("62500", "Second")]))
+        let parsed = LRCParser.parse(r?.synced ?? "")
+        XCTAssertEqual(parsed.map(\.time), [1.0, 62.5])
+        XCTAssertEqual(parsed.map(\.text), ["First", "Second"])
+    }
+
+    func testSyllableSyncedUsesLineStartTimes() {
+        let r = SpotifyLyricsService.parseLyrics(response("SYLLABLE_SYNCED", [line("2000", "Only")]))
+        XCTAssertEqual(LRCParser.parse(r?.synced ?? "").map(\.time), [2.0])
+    }
+
+    func testUnsyncedBecomesPlainText() {
+        let r = SpotifyLyricsService.parseLyrics(response("UNSYNCED", [line("0", "Секоја ноќ, секоја ноќ"), line("0", "Ја мислам на тебе")]))
+        XCTAssertNil(r?.synced)
+        XCTAssertEqual(r?.plain, "Секоја ноќ, секоја ноќ\nЈа мислам на тебе")
+    }
+
+    func testNoLinesIsNil() {
+        XCTAssertNil(SpotifyLyricsService.parseLyrics(response("LINE_SYNCED", [])))
+        XCTAssertNil(SpotifyLyricsService.parseLyrics(Data("{}".utf8)))
+    }
+
+    func testOnlyBase62TrackIdsAreLookedUp() {
+        XCTAssertTrue(SpotifyLyricsService.isTrackId("03E72sqhJiHswIl17oYQdb"))
+        XCTAssertFalse(SpotifyLyricsService.isTrackId(""))
+        XCTAssertFalse(SpotifyLyricsService.isTrackId("120"))   // last part of a spotify:local: URI
+        XCTAssertFalse(SpotifyLyricsService.isTrackId("03E72sqhJiHswIl17oYQd/"))
+    }
+}
+
+final class SpotifyLoginBlockTests: XCTestCase {
+    func testRejectedCookieStaysBlockedUntilTheCookieChanges() {
+        let block = SpotifyLyricsService.Block.cookieRejected(cookie: "old")
+        XCTAssertTrue(block.blocks(cookie: "old", now: Date().addingTimeInterval(86_400)))
+        XCTAssertFalse(block.blocks(cookie: "new", now: Date()))
+        XCTAssertEqual(block.warning, .cookieRejected)
+    }
+
+    func testLoginChangeBlocksForTenMinutesThenRetries() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let block = SpotifyLyricsService.Block.loginChanged(since: start)
+        XCTAssertTrue(block.blocks(cookie: "any", now: start.addingTimeInterval(599)))
+        XCTAssertFalse(block.blocks(cookie: "any", now: start.addingTimeInterval(601)))
+        XCTAssertEqual(block.warning, .loginChanged)
     }
 }

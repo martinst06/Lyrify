@@ -20,14 +20,14 @@ struct LyricsService {
     /// `onEarlyPlain` fires as soon as the exact-match lookup returns plain-only lyrics,
     /// before the (slower) synced search finishes — so the UI can show something instead
     /// of "Loading…". The final return value is still the best available result.
-    static func fetchSync(title: String, artist: String, album: String, durationMs: Int,
+    static func fetchSync(trackId: String, title: String, artist: String, album: String, durationMs: Int,
                           onEarlyPlain: ((String) -> Void)? = nil) -> LyricsResult {
-        let key = [title, artist, album, String(durationMs)].joined(separator: "\u{1F}")
+        let key = [trackId, title, artist, album, String(durationMs)].joined(separator: "\u{1F}")
         cacheLock.lock(); let cached = cache[key]; cacheLock.unlock()
         if let cached = cached { return cached }
 
-        // Start the search concurrently with the exact-match lookup, so a slow LRCLIB
-        // costs one round-trip instead of two back-to-back.
+        // Start the search concurrently with the Spotify and exact-match lookups, so a slow
+        // LRCLIB costs one round-trip instead of stacking behind them.
         let holder = Holder()
         let group = DispatchGroup()
         group.enter()
@@ -35,6 +35,9 @@ struct LyricsService {
             holder.value = searchMatch(title: title, artist: artist, durationMs: durationMs)
             group.leave()
         }
+
+        // 0. Spotify's own lyrics always win, synced or plain. Off unless `spDc` is configured.
+        if let r = SpotifyLyricsService.fetch(trackId: trackId) { return store(key, r) }
 
         var fallbackPlain: String?
 
